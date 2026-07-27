@@ -1,0 +1,114 @@
+---
+# Quick real-world test: a few cheap Haiku tasks, then one heavier
+# Sonnet task, all via Vertex AI.
+#
+# Usage:
+#   ansible-playbook tests/test_models.yml \
+#     -e vertex_project=your-gcp-project-id
+#
+# Or rely on env vars already set for Claude Code's own Vertex config
+# (CLOUD_ML_REGION, ANTHROPIC_VERTEX_PROJECT_ID) and omit -e entirely.
+
+- name: Test aknochow.claude with Haiku and Sonnet
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    provider: vertex
+    region: "{{ lookup('env', 'CLOUD_ML_REGION') | default('global', true) }}"
+    project_id: "{{ vertex_project | default(lookup('env', 'ANTHROPIC_VERTEX_PROJECT_ID'), true) }}"
+    haiku_model: claude-haiku-4-5
+    sonnet_model: claude-sonnet-5
+
+  tasks:
+    - name: "Haiku: simple math"
+      aknochow.claude.message:
+        provider: "{{ provider }}"
+        region: "{{ region }}"
+        project_id: "{{ project_id }}"
+        model: "{{ haiku_model }}"
+        max_tokens: 32
+        messages:
+          - role: user
+            content: "What is 17 * 6? Reply with only the number."
+      register: math_result
+
+    - name: Show math answer
+      ansible.builtin.debug:
+        msg: "17 * 6 = {{ math_result.text | trim }}"
+
+    - name: "Haiku: write a haiku about Ansible"
+      aknochow.claude.message:
+        provider: "{{ provider }}"
+        region: "{{ region }}"
+        project_id: "{{ project_id }}"
+        model: "{{ haiku_model }}"
+        max_tokens: 64
+        messages:
+          - role: user
+            content: "Write a haiku about automating infrastructure."
+      register: haiku_poem
+
+    - name: Show the haiku
+      ansible.builtin.debug:
+        msg: "{{ haiku_poem.text | trim }}"
+
+    - name: "Haiku: sentiment classification via forced tool use"
+      aknochow.claude.message:
+        provider: "{{ provider }}"
+        region: "{{ region }}"
+        project_id: "{{ project_id }}"
+        model: "{{ haiku_model }}"
+        max_tokens: 64
+        messages:
+          - role: user
+            content: "Classify the sentiment: 'This collection saved me hours of work!'"
+        tools:
+          - name: classify_sentiment
+            description: Classify text sentiment.
+            input_schema:
+              type: object
+              properties:
+                sentiment:
+                  type: string
+                  enum: [positive, neutral, negative]
+              required: [sentiment]
+        tool_choice:
+          type: tool
+          name: classify_sentiment
+      register: sentiment
+
+    - name: Show sentiment classification
+      ansible.builtin.debug:
+        msg: "Sentiment: {{ sentiment.tool_calls[0].input.sentiment }}"
+
+    - name: "Sonnet: tradeoff analysis (heavier reasoning task)"
+      aknochow.claude.message:
+        provider: "{{ provider }}"
+        region: "{{ region }}"
+        project_id: "{{ project_id }}"
+        model: "{{ sonnet_model }}"
+        max_tokens: 512
+        messages:
+          - role: user
+            content: >-
+              In 3 concise bullet points, explain the key tradeoffs between
+              REST and gRPC for a service-to-service API.
+      register: tradeoffs
+
+    - name: Show Sonnet's analysis
+      ansible.builtin.debug:
+        msg: "{{ tradeoffs.text }}"
+
+    - name: Compute usage totals per model
+      ansible.builtin.set_fact:
+        haiku_calls: [ "{{ math_result }}", "{{ haiku_poem }}", "{{ sentiment }}" ]
+        sonnet_calls: [ "{{ tradeoffs }}" ]
+
+    - name: Show token usage summary across all calls
+      ansible.builtin.debug:
+        msg:
+          - "Haiku  ({{ haiku_calls | length }} calls): {{ haiku_calls | map(attribute='usage.input_tokens') | sum }} input / {{ haiku_calls | map(attribute='usage.output_tokens') | sum }} output tokens"
+          - "Sonnet ({{ sonnet_calls | length }} calls): {{ sonnet_calls | map(attribute='usage.input_tokens') | sum }} input / {{ sonnet_calls | map(attribute='usage.output_tokens') | sum }} output tokens"
+          - "Total: {{ (haiku_calls + sonnet_calls) | map(attribute='usage.input_tokens') | sum }} input / {{ (haiku_calls + sonnet_calls) | map(attribute='usage.output_tokens') | sum }} output tokens"

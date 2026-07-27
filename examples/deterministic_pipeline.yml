@@ -1,0 +1,68 @@
+---
+# Example: Deterministic branching pipeline with forced tool use.
+#
+# Forces Claude to call exactly one tool, guaranteeing the shape of the
+# response, then branches the play on the result — no ambiguity, no
+# free-text parsing.
+#
+# Usage:
+#   ansible-playbook examples/deterministic_pipeline.yml
+#
+# Auth via environment variables:
+#   export ANTHROPIC_API_KEY=sk-ant-...
+
+- name: Deterministic classify-and-branch pipeline
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    log_line: "2026-07-24T09:41:12Z ERROR db_pool: connection refused after 3 retries, giving up"
+
+    classify_tool:
+      name: classify_log
+      description: Classify a log line by severity and category.
+      input_schema:
+        type: object
+        properties:
+          severity:
+            type: string
+            enum: [info, warning, error, fatal]
+          category:
+            type: string
+            enum: [network, database, auth, application, unknown]
+          actionable:
+            type: boolean
+        required: [severity, category, actionable]
+
+  tasks:
+    - name: Force the classification tool call
+      aknochow.claude.message:
+        model: claude-sonnet-5
+        max_tokens: 256
+        messages:
+          - role: user
+            content: "Classify this log line: {{ log_line }}"
+        tools:
+          - "{{ classify_tool }}"
+        tool_choice:
+          type: tool
+          name: classify_log
+      register: classification
+
+    - name: Extract the tool call input
+      ansible.builtin.set_fact:
+        log_class: "{{ classification.tool_calls[0].input }}"
+
+    - name: Branch on category
+      ansible.builtin.debug:
+        msg: "Database issue detected — would trigger DB runbook"
+      when:
+        - log_class.category == "database"
+        - log_class.actionable
+
+    - name: Branch on severity
+      ansible.builtin.fail:
+        msg: "Fatal error detected: {{ log_line }}"
+      when: log_class.severity == "fatal"
+      ignore_errors: true

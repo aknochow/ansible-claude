@@ -1,0 +1,181 @@
+---
+# Compare cost and correctness: aknochow.claude.message (raw Messages API)
+# vs `claude -p` (Claude Code CLI, agentic session) — same tasks, same
+# models, structured output on both sides so correctness is an exact
+# comparison, not a vibe check.
+#
+# Key finding this playbook surfaces: `claude -p` pays for its full
+# system prompt + tool definitions on EVERY invocation as
+# cache_creation_input_tokens (no cache reuse across separate CLI
+# processes) — on the order of ~39k tokens per call in this environment,
+# regardless of how trivial the task is. aknochow.claude.message sends
+# only what you put in `messages`, so per-call cost scales with the
+# actual task, not with a fixed agent-session tax.
+#
+# Requirements: `claude` CLI installed and authenticated; Vertex creds
+# available (or swap provider/vars for direct Anthropic API auth).
+#
+# Usage:
+#   ansible-playbook examples/cost_effectiveness_comparison.yml
+
+- name: Compare aknochow.claude.message vs claude -p — cost and correctness
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    provider: vertex
+    vertex_region: global
+    vertex_project: your-gcp-project-id
+    model: claude-haiku-4-5
+
+    # $ per million tokens. Source: platform.claude.com/docs/en/about-claude/pricing (2026-07).
+    model_pricing:
+      claude-haiku-4-5: { input: 1.00, output: 5.00 }
+      claude-sonnet-5: { input: 2.00, output: 10.00 }
+
+    benchmark_tasks:
+      - name: math
+        prompt: "What is 17 * 6?"
+        schema:
+          type: object
+          properties:
+            answer: { type: integer }
+          required: [answer]
+          additionalProperties: false
+        expected: { answer: 102 }
+
+      - name: sentiment
+        prompt: "Classify the sentiment: 'This collection saved me hours of work!'"
+        schema:
+          type: object
+          properties:
+            sentiment: { type: string, enum: [positive, neutral, negative] }
+          required: [sentiment]
+          additionalProperties: false
+        expected: { sentiment: positive }
+
+      - name: extraction
+        prompt: "Extract name and age from: John is 42 years old."
+        schema:
+          type: object
+          properties:
+            name: { type: string }
+            age: { type: integer }
+          required: [name, age]
+          additionalProperties: false
+        expected: { name: John, age: 42 }
+
+  tasks:
+    # =========================================================================
+    # Path A: aknochow.claude.message (raw Messages API)
+    # =========================================================================
+
+    - name: "API: run each task via aknochow.claude.message"
+      aknochow.claude.message:
+        provider: "{{ provider }}"
+        region: "{{ vertex_region }}"
+        project_id: "{{ vertex_project }}"
+        access_token: "{{ vertex_access_token | default(omit) }}"
+        model: "{{ model }}"
+        max_tokens: 256
+        messages:
+          - role: user
+            content: "{{ item.prompt }}"
+        output_config:
+          format:
+            type: json_schema
+            schema: "{{ item.schema }}"
+      loop: "{{ benchmark_tasks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: api_results
+
+    - name: "API: score correctness and cost per task"
+      ansible.builtin.set_fact:
+        api_summary: "{{ api_summary | default([]) + [entry] }}"
+      loop: "{{ api_results.results }}"
+      loop_control:
+        label: "{{ benchmark_tasks[idx].name }}"
+        index_var: idx
+      vars:
+        pricing: "{{ model_pricing[model] }}"
+        cost: >-
+          {{
+            (item.usage.input_tokens * pricing.input
+             + item.usage.output_tokens * pricing.output) / 1000000
+          }}
+        entry:
+          task: "{{ benchmark_tasks[idx].name }}"
+          correct: "{{ item.structured == benchmark_tasks[idx].expected }}"
+          input_tokens: "{{ item.usage.input_tokens }}"
+          output_tokens: "{{ item.usage.output_tokens }}"
+          cost_usd: "{{ cost | float }}"
+
+    # =========================================================================
+    # Path B: claude -p (Claude Code CLI, agentic session)
+    # =========================================================================
+
+    - name: "CLI: run each task via claude -p"
+      ansible.builtin.command:
+        argv:
+          - claude
+          - -p
+          - "{{ item.prompt }}"
+          - --output-format
+          - json
+          - --model
+          - "{{ model }}"
+          - --json-schema
+          - "{{ item.schema | to_json }}"
+      loop: "{{ benchmark_tasks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: cli_raw_results
+      changed_when: false
+
+    - name: "CLI: score correctness and cost per task"
+      ansible.builtin.set_fact:
+        cli_summary: "{{ cli_summary | default([]) + [entry] }}"
+      loop: "{{ cli_raw_results.results }}"
+      loop_control:
+        label: "{{ benchmark_tasks[idx].name }}"
+        index_var: idx
+      vars:
+        parsed: "{{ item.stdout | from_json }}"
+        entry:
+          task: "{{ benchmark_tasks[idx].name }}"
+          correct: "{{ parsed.structured_output == benchmark_tasks[idx].expected }}"
+          input_tokens: "{{ parsed.usage.input_tokens }}"
+          output_tokens: "{{ parsed.usage.output_tokens }}"
+          cache_creation_tokens: "{{ parsed.usage.cache_creation_input_tokens }}"
+          cost_usd: "{{ parsed.total_cost_usd }}"
+          duration_ms: "{{ parsed.duration_ms }}"
+
+    # =========================================================================
+    # Comparison report
+    # =========================================================================
+
+    - name: Show per-task comparison
+      ansible.builtin.debug:
+        msg:
+          - "--- {{ api_summary[idx].task }} ---"
+          - "  aknochow.claude.message: correct={{ api_summary[idx].correct }}  tokens={{ api_summary[idx].input_tokens }}in/{{ api_summary[idx].output_tokens }}out  cost=${{ '%.6f' | format(api_summary[idx].cost_usd) }}"
+          - "  claude -p:               correct={{ cli_summary[idx].correct }}  tokens={{ cli_summary[idx].input_tokens }}in/{{ cli_summary[idx].output_tokens }}out (+{{ cli_summary[idx].cache_creation_tokens }} cache)  cost=${{ '%.6f' | format(cli_summary[idx].cost_usd | float) }}  ({{ cli_summary[idx].duration_ms }}ms)"
+      loop: "{{ range(0, benchmark_tasks | length) | list }}"
+      loop_control:
+        loop_var: idx
+        label: "{{ benchmark_tasks[idx].name }}"
+
+    - name: Show aggregate summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AGGREGATE ({{ benchmark_tasks | length }} tasks, model={{ model }}) ==="
+          - "aknochow.claude.message: {{ api_summary | selectattr('correct') | list | length }}/{{ benchmark_tasks | length }} correct, total cost ${{ '%.6f' | format(api_summary | map(attribute='cost_usd') | sum) }}"
+          - "claude -p:               {{ cli_summary | selectattr('correct') | list | length }}/{{ benchmark_tasks | length }} correct, total cost ${{ '%.6f' | format(cli_summary | map(attribute='cost_usd') | map('float') | sum) }}"
+          - >-
+            Cost multiplier (CLI / API): {{ '%.1f' | format(
+              (cli_summary | map(attribute='cost_usd') | map('float') | sum)
+              / (api_summary | map(attribute='cost_usd') | sum)
+            ) }}x
+          - "Fixed per-call overhead in claude -p (system prompt + tools, uncached across processes): ~{{ (cli_summary | map(attribute='cache_creation_tokens') | map('int') | sum / benchmark_tasks | length) | round | int }} tokens/call average"

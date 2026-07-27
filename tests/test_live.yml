@@ -1,0 +1,188 @@
+---
+# Live smoke test against a real Claude backend.
+#
+# Usage:
+#   ansible-playbook tests/test_live.yml -e claude_provider=anthropic
+#   ansible-playbook tests/test_live.yml -e claude_provider=vertex \
+#     -e vertex_region=us-east5 -e vertex_project=my-gcp-project
+#
+# Auth via environment variables (ANTHROPIC_API_KEY / CLOUD_ML_REGION /
+# ANTHROPIC_VERTEX_PROJECT_ID) also works and avoids passing secrets on
+# the command line.
+
+- name: aknochow.claude live smoke test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    claude_provider: "anthropic"
+    vertex_region: ""
+    vertex_project: ""
+    model: "claude-sonnet-5"
+
+    provider_args: >-
+      {{
+        {"provider": "vertex", "region": vertex_region, "project_id": vertex_project}
+        if claude_provider == "vertex"
+        else {"provider": "anthropic"}
+      }}
+
+  tasks:
+    - name: Basic message call
+      aknochow.claude.message:
+        model: "{{ model }}"
+        max_tokens: 64
+        messages:
+          - role: user
+            content: "Reply with exactly the word: pong"
+        provider: "{{ provider_args.provider }}"
+        region: "{{ provider_args.region | default(omit) }}"
+        project_id: "{{ provider_args.project_id | default(omit) }}"
+      register: basic
+
+    - name: Assert basic call succeeded
+      ansible.builtin.assert:
+        that:
+          - basic.text | length > 0
+          - basic.stop_reason == "end_turn"
+          - basic.usage.input_tokens > 0
+          - basic.usage.output_tokens > 0
+
+    - name: Count tokens pre-flight
+      aknochow.claude.count_tokens:
+        model: "{{ model }}"
+        messages:
+          - role: user
+            content: "Reply with exactly the word: pong"
+        provider: "{{ provider_args.provider }}"
+        region: "{{ provider_args.region | default(omit) }}"
+        project_id: "{{ provider_args.project_id | default(omit) }}"
+      register: counted
+
+    - name: Assert token count is sane
+      ansible.builtin.assert:
+        that:
+          - counted.input_tokens > 0
+          - counted.input_tokens == basic.usage.input_tokens
+
+    - name: Structured output extraction
+      aknochow.claude.message:
+        model: "{{ model }}"
+        max_tokens: 256
+        messages:
+          - role: user
+            content: "Extract name and age from: John is 42 years old."
+        output_config:
+          format:
+            type: json_schema
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                age: {type: integer}
+              required: [name, age]
+        provider: "{{ provider_args.provider }}"
+        region: "{{ provider_args.region | default(omit) }}"
+        project_id: "{{ provider_args.project_id | default(omit) }}"
+      register: structured
+
+    - name: Assert structured output parsed correctly
+      ansible.builtin.assert:
+        that:
+          - structured.structured.name == "John"
+          - structured.structured.age == 42
+
+    - name: Forced tool use
+      aknochow.claude.message:
+        model: "{{ model }}"
+        max_tokens: 128
+        messages:
+          - role: user
+            content: "What's the weather in Boston?"
+        tools:
+          - name: get_weather
+            description: Get the weather for a city.
+            input_schema:
+              type: object
+              properties:
+                city: {type: string}
+              required: [city]
+        tool_choice:
+          type: tool
+          name: get_weather
+        provider: "{{ provider_args.provider }}"
+        region: "{{ provider_args.region | default(omit) }}"
+        project_id: "{{ provider_args.project_id | default(omit) }}"
+      register: tool_result
+
+    - name: Assert tool call was made
+      ansible.builtin.assert:
+        that:
+          - tool_result.tool_calls | length == 1
+          - tool_result.tool_calls[0].name == "get_weather"
+          - "'city' in tool_result.tool_calls[0].input"
+
+    - name: Batch API submit/poll (direct API only)
+      when: claude_provider == "anthropic"
+      block:
+        - name: Submit a small batch
+          aknochow.claude.message_batch:
+            requests:
+              - custom_id: item-1
+                params:
+                  model: "{{ model }}"
+                  max_tokens: 32
+                  messages:
+                    - role: user
+                      content: "Reply with exactly: one"
+              - custom_id: item-2
+                params:
+                  model: "{{ model }}"
+                  max_tokens: 32
+                  messages:
+                    - role: user
+                      content: "Reply with exactly: two"
+            state: present
+          register: batch
+
+        - name: Assert batch was created
+          ansible.builtin.assert:
+            that:
+              - batch.batch_id != ""
+              - batch.processing_status in ["in_progress", "ended"]
+
+        - name: Wait for batch to finish
+          aknochow.claude.message_batch:
+            batch_id: "{{ batch.batch_id }}"
+            wait: true
+            wait_timeout: 300
+          register: finished
+
+        - name: Assert batch results are present
+          ansible.builtin.assert:
+            that:
+              - finished.processing_status == "ended"
+              - "'item-1' in finished.results"
+              - "'item-2' in finished.results"
+
+    - name: Batch API rejects non-anthropic provider
+      aknochow.claude.message_batch:
+        provider: vertex
+        region: "{{ vertex_region }}"
+        project_id: "{{ vertex_project }}"
+        requests:
+          - custom_id: x
+            params: {model: "{{ model }}", max_tokens: 16, messages: [{role: user, content: hi}]}
+      register: bad_batch
+      ignore_errors: true
+
+    - name: Assert clean failure on unsupported provider
+      ansible.builtin.assert:
+        that:
+          - bad_batch.failed
+          - "'Vertex' in bad_batch.msg or 'Bedrock' in bad_batch.msg"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: "All aknochow.claude live smoke tests passed against provider={{ claude_provider }}"

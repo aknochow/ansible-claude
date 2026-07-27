@@ -1,0 +1,63 @@
+---
+# Example: Structured extraction with native output_config.
+#
+# Sends a bug report to Claude and gets back clean, schema-validated
+# JSON — no text parsing, ready to use directly as vars/when conditions.
+#
+# Usage:
+#   ansible-playbook examples/structured_extraction.yml
+#
+# Auth via environment variables:
+#   export ANTHROPIC_API_KEY=sk-ant-...
+#   # or, for Vertex:
+#   export ANSIBLE_CLAUDE_PROVIDER=vertex
+#   export CLOUD_ML_REGION=us-east5
+#   export ANTHROPIC_VERTEX_PROJECT_ID=my-gcp-project
+
+- name: Structured bug triage extraction
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    bug_report: |
+      Users report that the login page crashes with a 500 error when
+      submitting the form with an empty password field. This is blocking
+      all authentication and affects every user on the platform.
+
+  tasks:
+    - name: Extract structured triage fields
+      aknochow.claude.message:
+        model: claude-sonnet-5
+        max_tokens: 512
+        messages:
+          - role: user
+            content: "Triage this bug report: {{ bug_report }}"
+        output_config:
+          format:
+            type: json_schema
+            schema:
+              type: object
+              properties:
+                summary:
+                  type: string
+                severity:
+                  type: string
+                  enum: [low, medium, high, critical]
+                affected_component:
+                  type: string
+              required: [summary, severity, affected_component]
+      register: triage
+
+    - name: Show the structured result
+      ansible.builtin.debug:
+        msg: "[{{ triage.structured.severity | upper }}] {{ triage.structured.affected_component }}: {{ triage.structured.summary }}"
+
+    - name: Page on-call if critical
+      ansible.builtin.debug:
+        msg: "Would page on-call here"
+      when: triage.structured.severity == "critical"
+
+    - name: Show token usage
+      ansible.builtin.debug:
+        msg: "Used {{ triage.usage.input_tokens }} input / {{ triage.usage.output_tokens }} output tokens"

@@ -1,0 +1,67 @@
+---
+# Example: Bulk analysis via the Message Batches API.
+#
+# Submits many independent requests in a single batch (cheaper and more
+# efficient than looping individual calls), polls until done, and maps
+# results back to their source files by custom_id.
+#
+# Note: Batches require provider=anthropic (direct API) — not supported
+# on Vertex AI or Bedrock.
+#
+# Usage:
+#   ansible-playbook examples/batch_analysis.yml
+#
+# Auth via environment variables:
+#   export ANTHROPIC_API_KEY=sk-ant-...
+
+- name: Bulk file analysis via Message Batches
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    files_to_review:
+      - id: file-auth
+        content: "def login(user, pw): return db.query(f'SELECT * FROM users WHERE name={user}')"
+      - id: file-utils
+        content: "def add(a, b): return a + b"
+
+  tasks:
+    - name: Build the batch request list
+      ansible.builtin.set_fact:
+        batch_requests: "{{ batch_requests | default([]) + [request] }}"
+      loop: "{{ files_to_review }}"
+      loop_control:
+        loop_var: file
+        label: "{{ file.id }}"
+      vars:
+        request:
+          custom_id: "{{ file.id }}"
+          params:
+            model: claude-sonnet-5
+            max_tokens: 512
+            messages:
+              - role: user
+                content: "Review this code for security issues: {{ file.content }}"
+
+    - name: Submit the batch
+      aknochow.claude.message_batch:
+        requests: "{{ batch_requests }}"
+        state: present
+      register: batch
+
+    - name: Poll until the batch finishes
+      aknochow.claude.message_batch:
+        batch_id: "{{ batch.batch_id }}"
+        wait: true
+        wait_timeout: 1800
+      register: finished
+
+    - name: Show each file's review
+      ansible.builtin.debug:
+        msg: "{{ file.id }}: {{ finished.results[file.id].message.content[0].text }}"
+      loop: "{{ files_to_review }}"
+      loop_control:
+        loop_var: file
+        label: "{{ file.id }}"
+      when: finished.results is defined and file.id in finished.results

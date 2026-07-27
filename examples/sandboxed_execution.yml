@@ -1,0 +1,127 @@
+---
+# Example: Run a Claude call *inside* an OpenShell sandbox.
+#
+# Combines aknochow.openshell (sandbox lifecycle) with aknochow.claude
+# (direct Messages API calls) via Ansible's native delegate_to — no new
+# modules needed on either side.
+#
+# How it works: OpenShell has no raw TCP SSH port to connect to directly;
+# SSH bytes only travel inside a gRPC stream, relayed by the vendor's own
+# `openshell ssh-proxy` binary acting as an OpenSSH ProxyCommand (this is
+# exactly what `openshell sandbox ssh-config <name>` renders for VSCode
+# Remote-SSH). We register the sandbox as an in-memory Ansible host with
+# that ProxyCommand wired up, then delegate_to it like any other host.
+#
+# Requirements:
+#   - aknochow.openshell collection installed
+#   - `openshell` CLI installed and authenticated on the CONTROL NODE
+#     (it's the ProxyCommand subprocess — it never runs inside the sandbox)
+#
+# Usage:
+#   ansible-playbook examples/sandboxed_execution.yml -e anthropic_api_key=sk-ant-...
+
+- name: Run Claude inside an OpenShell sandbox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    gateway_name: openshell
+    gateway_url: "https://127.0.0.1:17670"
+    gateway_mtls_dir: "{{ lookup('env', 'HOME') }}/.config/openshell/gateways/{{ gateway_name }}/mtls"
+    sandbox_image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+    sandbox_name: claude-in-sandbox-demo
+
+    # Claude auth — defaults to direct API. Override with -e provider=vertex
+    # -e vertex_region=... -e vertex_project=... -e vertex_access_token=...
+    # to test against Vertex AI instead (no ANTHROPIC_API_KEY needed).
+    provider: anthropic
+    pip_package: "{{ 'anthropic[vertex]' if provider == 'vertex' else 'anthropic' }}"
+    claude_auth_params: >-
+      {{
+        {"provider": "vertex", "region": vertex_region | default(""), "project_id": vertex_project | default(""), "access_token": vertex_access_token | default("")}
+        if provider == "vertex"
+        else {"provider": "anthropic", "api_key": anthropic_api_key | default("")}
+      }}
+
+  tasks:
+    - name: Create a sandbox
+      aknochow.openshell.sandbox:
+        gateway: "{{ gateway_url }}"
+        tls_cert: "{{ gateway_mtls_dir }}/tls.crt"
+        tls_key: "{{ gateway_mtls_dir }}/tls.key"
+        tls_ca: "{{ gateway_mtls_dir }}/ca.crt"
+        name: "{{ sandbox_name }}"
+        image: "{{ sandbox_image }}"
+        state: present
+      register: sandbox
+
+    - name: Register the sandbox as an Ansible host over SSH
+      ansible.builtin.add_host:
+        name: sandbox_target
+        ansible_host: "openshell-{{ sandbox.sandbox.name }}"
+        ansible_user: sandbox
+        ansible_connection: ssh
+        ansible_ssh_common_args: >-
+          -o ProxyCommand="openshell ssh-proxy --gateway-name {{ gateway_name }} --name {{ sandbox.sandbox.name }}"
+          -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+          -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR
+
+    - name: Prove this task runs inside the sandbox, not the controller
+      ansible.builtin.command: hostname
+      delegate_to: sandbox_target
+      register: sandbox_hostname
+      changed_when: false
+
+    - name: Show the sandbox's hostname
+      ansible.builtin.debug:
+        msg: "Delegated tasks are executing on: {{ sandbox_hostname.stdout }}"
+
+    - name: Bootstrap packaging (ansible.builtin.pip needs it to run at all)
+      ansible.builtin.command: python3 -m pip install packaging
+      delegate_to: sandbox_target
+      changed_when: true
+
+    - name: Ensure the anthropic SDK is installed in the sandbox
+      ansible.builtin.pip:
+        name: "{{ pip_package }}"
+        state: present
+      delegate_to: sandbox_target
+
+    - name: Sanity-check the SDK import
+      ansible.builtin.command: python3 -c "import anthropic; print(anthropic.__version__)"
+      delegate_to: sandbox_target
+      register: sdk_check
+      changed_when: false
+
+    - name: Show installed SDK version
+      ansible.builtin.debug:
+        msg: "anthropic SDK {{ sdk_check.stdout }} installed inside the sandbox"
+
+    - name: Run a Claude call from inside the sandbox
+      aknochow.claude.message:
+        provider: "{{ claude_auth_params.provider }}"
+        api_key: "{{ claude_auth_params.api_key | default(omit) }}"
+        region: "{{ claude_auth_params.region | default(omit) }}"
+        project_id: "{{ claude_auth_params.project_id | default(omit) }}"
+        access_token: "{{ claude_auth_params.access_token | default(omit) }}"
+        model: "{{ 'claude-sonnet-5' if provider == 'vertex' else 'claude-haiku-4-5' }}"
+        max_tokens: 128
+        messages:
+          - role: user
+            content: "Reply with exactly: hello from inside the sandbox"
+      delegate_to: sandbox_target
+      register: result
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg: "{{ result.text }}"
+
+    - name: Delete the sandbox
+      aknochow.openshell.sandbox:
+        gateway: "{{ gateway_url }}"
+        tls_cert: "{{ gateway_mtls_dir }}/tls.crt"
+        tls_key: "{{ gateway_mtls_dir }}/tls.key"
+        tls_ca: "{{ gateway_mtls_dir }}/ca.crt"
+        name: "{{ sandbox.sandbox.name }}"
+        state: absent

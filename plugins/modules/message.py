@@ -177,7 +177,7 @@ from ansible_collections.aknochow.claude.plugins.module_utils.claude_client impo
 )
 
 
-def flatten_response(message):
+def flatten_response(message, parse_structured=False):
     text_parts = []
     tool_calls = []
     for block in message.content:
@@ -188,7 +188,12 @@ def flatten_response(message):
 
     text = "".join(text_parts)
     structured = None
-    if text:
+    # Only attempt the parse when the caller actually requested structured
+    # output -- otherwise plain conversational text that merely happens to
+    # parse as JSON (e.g. a reply of "42" or "[1,2,3]") would silently gain
+    # a `structured` key, contradicting the RETURN doc's own claim that
+    # it's only present "when output_config is set".
+    if parse_structured and text:
         try:
             structured = json.loads(text)
         except (json.JSONDecodeError, ValueError):
@@ -264,7 +269,10 @@ def main():
         # A message call never mutates infrastructure state -- it's a
         # query, same as the aknochow.gemini generate module. changed
         # is always False here, not conditional on the response.
-        module.exit_json(changed=False, **flatten_response(response))
+        module.exit_json(
+            changed=False,
+            **flatten_response(response, parse_structured=bool(module.params.get("output_config"))),
+        )
     except AnthropicError as e:
         module.fail_json(msg=str(e))
 

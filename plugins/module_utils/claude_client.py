@@ -85,12 +85,14 @@ def get_client(module: AnsibleModule):
             module.fail_json(
                 msg="The anthropic Python SDK is required. Install it with: pip install anthropic"
             )
+            return
         api_key = module.params.get("api_key")
         auth_token = module.params.get("auth_token")
         if not api_key and not auth_token:
             module.fail_json(
                 msg="'api_key' or 'auth_token' is required when provider=anthropic"
             )
+            return
         return Anthropic(
             api_key=api_key,
             auth_token=auth_token,
@@ -106,12 +108,14 @@ def get_client(module: AnsibleModule):
             module.fail_json(
                 msg="The anthropic Vertex extra is required. Install it with: pip install 'anthropic[vertex]'"
             )
+            return
         region = module.params.get("region")
         project_id = module.params.get("project_id")
         if not region or not project_id:
             module.fail_json(
                 msg="'region' and 'project_id' are required when provider=vertex"
             )
+            return
         return AnthropicVertex(
             region=region,
             project_id=project_id,
@@ -128,6 +132,7 @@ def get_client(module: AnsibleModule):
             module.fail_json(
                 msg="The anthropic Bedrock extra is required. Install it with: pip install 'anthropic[bedrock]'"
             )
+            return
         return AnthropicBedrock(
             aws_access_key=module.params.get("aws_access_key"),
             aws_secret_key=module.params.get("aws_secret_key"),
@@ -140,3 +145,4 @@ def get_client(module: AnsibleModule):
         )
 
     module.fail_json(msg=f"Unknown provider: {provider}")
+    return

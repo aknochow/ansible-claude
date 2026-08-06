@@ -78,6 +78,16 @@ class TestGetClient:
         get_client(module)
         module.fail_json.assert_called_once()
         assert "api_key" in module.fail_json.call_args.kwargs["msg"]
+        # Regression test: get_client() must return immediately after
+        # fail_json() rather than falling through to construct a client
+        # with the very params it just reported as missing. A bare
+        # MagicMock()'s fail_json() doesn't raise/exit the way the real
+        # AnsibleModule.fail_json() does, so without an explicit `return`
+        # right after the call, execution continues to `return
+        # Anthropic(api_key=None, auth_token=None, ...)` and this
+        # assertion is what actually catches that -- fails on the
+        # unfixed code, passes once get_client() returns early.
+        mock_anthropic.Anthropic.assert_not_called()
 
     def test_vertex_provider(self, mock_anthropic):
         from ansible_collections.aknochow.claude.plugins.module_utils.claude_client import (
@@ -119,6 +129,35 @@ class TestGetClient:
 
         get_client(module)
         module.fail_json.assert_called_once()
+        # Same regression coverage as test_anthropic_requires_auth above --
+        # without the fix, this falls through to
+        # AnthropicVertex(region=None, project_id=None, ...).
+        mock_anthropic.AnthropicVertex.assert_not_called()
+
+    def test_unknown_provider_does_not_construct_a_client(self, mock_anthropic):
+        from ansible_collections.aknochow.claude.plugins.module_utils.claude_client import (
+            get_client,
+        )
+
+        module = MagicMock()
+        module.params = {
+            "provider": "not-a-real-provider",
+            "timeout": 120.0,
+            "max_retries": 2,
+        }
+
+        result = get_client(module)
+        module.fail_json.assert_called_once()
+        assert "not-a-real-provider" in module.fail_json.call_args.kwargs["msg"]
+        # Previously untested path -- the function's final catch-all
+        # fail_json(). Without the fix this still returns None (there's
+        # nothing left to fall through to at the end of the function), so
+        # the interesting assertion is that fail_json fired at all with a
+        # useful message, and that no SDK constructor was ever reached.
+        assert result is None
+        mock_anthropic.Anthropic.assert_not_called()
+        mock_anthropic.AnthropicVertex.assert_not_called()
+        mock_anthropic.AnthropicBedrock.assert_not_called()
 
     def test_bedrock_provider(self, mock_anthropic):
         from ansible_collections.aknochow.claude.plugins.module_utils.claude_client import (

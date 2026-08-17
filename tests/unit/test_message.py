@@ -109,3 +109,44 @@ class TestFlattenResponse:
 
         assert result["usage"]["cache_creation_input_tokens"] == 100
         assert result["usage"]["cache_read_input_tokens"] == 50
+
+
+class TestMainReportsChanged:
+    def test_main_reports_changed_false(self, mock_anthropic, monkeypatch):
+        from ansible_collections.aknochow.claude.plugins.modules import message as message_module
+
+        fake_module = MagicMock()
+        fake_module.params = {
+            "model": "claude-sonnet-5",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "system": None,
+            "cache_system": False,
+            "temperature": None,
+            "top_p": None,
+            "top_k": None,
+            "stop_sequences": None,
+            "tools": None,
+            "tool_choice": None,
+            "output_config": None,
+            "metadata": None,
+            "provider": "anthropic",
+            "api_key": "sk-ant-test",
+            "auth_token": None,
+            "base_url": None,
+            "timeout": 120.0,
+            "max_retries": 2,
+        }
+        mock_anthropic.Anthropic.return_value.messages.create.return_value = make_message(
+            [make_block("text", text="hi")]
+        )
+        monkeypatch.setattr(message_module, "AnsibleModule", lambda **kwargs: fake_module)
+
+        message_module.main()
+
+        fake_module.exit_json.assert_called_once()
+        # Regression check: a query call never mutates infrastructure
+        # state, so this must always be False -- not just "whatever the
+        # response happened to produce". Fails against the pre-fix
+        # hardcoded changed=True.
+        assert fake_module.exit_json.call_args.kwargs["changed"] is False

@@ -261,7 +261,10 @@ def main():
         from anthropic import AnthropicError
 
         response = client.messages.create(**kwargs)
-        module.exit_json(changed=True, **flatten_response(response))
+        # A message call never mutates infrastructure state -- it's a
+        # query, same as the aknochow.gemini generate module. changed
+        # is always False here, not conditional on the response.
+        module.exit_json(changed=False, **flatten_response(response))
     except AnthropicError as e:
         module.fail_json(msg=str(e))
 

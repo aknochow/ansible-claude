@@ -76,15 +76,30 @@ class TestFlattenResponse:
         assert result["tool_calls"] == [{"id": "tu_1", "name": "get_weather", "input": {"city": "SF"}}]
         assert result["stop_reason"] == "tool_use"
 
-    def test_structured_output_parsed(self, mock_anthropic):
+    def test_structured_output_parsed_when_requested(self, mock_anthropic):
         from ansible_collections.aknochow.claude.plugins.modules.message import (
             flatten_response,
         )
 
         message = make_message([make_block("text", text='{"name": "bug-1", "severity": "high"}')])
-        result = flatten_response(message)
+        result = flatten_response(message, parse_structured=True)
 
         assert result["structured"] == {"name": "bug-1", "severity": "high"}
+
+    def test_valid_json_text_not_parsed_when_not_requested(self, mock_anthropic):
+        from ansible_collections.aknochow.claude.plugins.modules.message import (
+            flatten_response,
+        )
+
+        # Regression check: text that HAPPENS to parse as JSON (e.g. the
+        # model replying "42" or "[1,2,3]" in plain conversation, no
+        # output_config involved) must not silently gain a `structured`
+        # key just because parse_structured defaults to False here. Fails
+        # against the pre-fix code, which parsed unconditionally.
+        message = make_message([make_block("text", text='{"name": "bug-1", "severity": "high"}')])
+        result = flatten_response(message)
+
+        assert "structured" not in result
 
     def test_non_json_text_has_no_structured_key(self, mock_anthropic):
         from ansible_collections.aknochow.claude.plugins.modules.message import (
@@ -92,7 +107,7 @@ class TestFlattenResponse:
         )
 
         message = make_message([make_block("text", text="just plain text")])
-        result = flatten_response(message)
+        result = flatten_response(message, parse_structured=True)
 
         assert "structured" not in result
 

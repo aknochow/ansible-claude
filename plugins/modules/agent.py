@@ -27,11 +27,18 @@ description:
     Set O(tools) explicitly to opt into agentic behavior; understand the security
     implications before doing so (see Security below).
   - "Harness overhead: even with O(tools=[]), O(max_turns=1), and no O(system_prompt),
-    every call carries roughly 389 input tokens of fixed harness overhead measured
-    against C(claude-haiku-4-5) -- this is the CLI's own framing, not billable API
-    content. A custom O(system_prompt) adds on top of that constant. Consumers
-    benchmarking this module's token cost against M(aknochow.claude.message) should
-    account for this fixed floor before comparing per-call costs."
+    every call carries fixed harness overhead measured against C(claude-haiku-4-5)
+    -- this is the CLI's own framing, not billable API content -- and it is
+    dominated by O(setting_sources), not the harness baseline itself. With
+    O(setting_sources=[]) (this module's default) a call measured ~234 input
+    tokens. With O(setting_sources) left unset (the SDK default of loading every
+    filesystem settings source) the same call, run with C(cwd) pointed at a real
+    project directory carrying its own C(CLAUDE.md)/skills, measured ~2,485 input
+    tokens -- roughly 2,250 extra tokens of that project's own instructions
+    silently pulled into context. A custom O(system_prompt) adds on top of
+    whichever baseline applies. Consumers benchmarking this module's token cost
+    against M(aknochow.claude.message) should account for this floor, and should
+    know it moves by an order of magnitude depending on O(setting_sources)."
   - Security -- this module can execute tools if O(tools) is set to anything other
     than an empty list. Never pass secrets in O(prompt) or O(system_prompt) that
     should not be visible to whatever tools are enabled. This module does not log
@@ -128,8 +135,41 @@ options:
     type: float
   cwd:
     description:
-      - Working directory for the underlying Claude Code session.
+      - "Working directory for the underlying Claude Code session. Prefer setting
+        this over relying on the calling process's own working directory -- a
+        C(claude) CLI subprocess started inside a directory that carries Claude
+        Code project configuration (a C(.claude/) tree, C(CLAUDE.md), etc.) can
+        stall its own C(initialize) control-request handshake, where the same
+        directory passed explicitly via O(cwd) does not reproduce that stall.
+        See O(setting_sources) for the related, and much larger, token-overhead
+        concern with running against a real project directory."
     type: path
+  setting_sources:
+    description:
+      - "Which filesystem settings sources the underlying Claude Code session
+        loads -- V(user) (C(~/.claude/settings.json)), V(project)
+        (C(.claude/settings.json)), V(local) (C(.claude/settings.local.json)).
+        Defaults to V([]) (load none of them), which differs from the SDK's own
+        default of loading everything when this is left unset."
+      - "Two independent reasons for that default, both confirmed by live
+        testing against a real project directory (see O(cwd)): (1) token cost --
+        a call with O(setting_sources=[]) measured ~234 input tokens; the same
+        call with every settings source loaded measured ~2,485 input tokens,
+        meaning roughly 2,250 tokens of that project's own C(CLAUDE.md) and
+        skills were pulled into context on every single call, silently. (2)
+        review integrity -- the primary intended use of this module is dispatching
+        code-review lenses over a repository's diff. If that repository's own
+        C(CLAUDE.md)/skills load into the reviewing session's context, the
+        repository being reviewed can steer its own review, deliberately or
+        not. Diff content already has to be treated as untrusted input for a
+        review tool; silently loading project-authored instructions on top of
+        it is the same category of risk. Set this explicitly (e.g. V([\"project\"]))
+        only when you specifically want that project's own configuration
+        applied and have reasoned about both costs above."
+    type: list
+    elements: str
+    choices: [user, project, local]
+    default: []
   add_dirs:
     description:
       - Additional directories the session may access beyond O(cwd).
@@ -164,13 +204,19 @@ notes:
     C(apiProvider: \"firstParty\") for the authenticated account -- this is genuine
     subscription OAuth, the same session the interactive C(claude) CLI uses, not a
     Console API key routed through a different door."
-  - "C(claude-agent-sdk) 0.2.144 hangs indefinitely at the C(initialize) control
-    request under Python 3.14 (confirmed: the raw CLI handshake completes
-    instantly when driven by hand, but the SDK's async read loop never observes
-    the response) -- this looks like an anyio/asyncio incompatibility with a very
-    new Python, not an auth or CLI problem. It works cleanly under Python 3.12.
-    O(timeout) bounds the damage on an affected host, but pin your control node's
-    interpreter to <3.14 for this module until upstream confirms 3.14 support."
+  - "Confirmed live: C(claude-agent-sdk) 0.2.144's C(initialize) control request
+    can stall indefinitely, and the reproducing variable is the underlying
+    C(claude) CLI subprocess's own working directory, not the Python interpreter
+    version -- same interpreter, only C(cwd) differed. Starting that subprocess
+    inside a directory carrying Claude Code project configuration (a
+    C(.claude/) tree, C(CLAUDE.md), etc.) stalled the handshake; the identical
+    call from a plain directory with no such configuration completed normally.
+    Passing the project directory via the O(cwd) *option* instead (so the SDK
+    launches the subprocess elsewhere and directs it at the project path) did
+    not reproduce the stall. Prefer O(cwd) over relying on the calling process's
+    own directory for this reason as well as the token-overhead one documented
+    under O(setting_sources). O(timeout) bounds the damage if a host hits this
+    regardless."
   - "Rate-limit exhaustion was not reproduced live (it would require actually
     exhausting the subscription's quota, which this module's own testing
     deliberately avoided). Based on the SDK's typed surface: a hard rejection
@@ -389,6 +435,12 @@ def build_options(module, ClaudeAgentOptions):
     kwargs = dict(
         tools=params["tools"],
         max_turns=params["max_turns"],
+        # Always passed explicitly, never left to the SDK's own default of
+        # loading every filesystem settings source -- see the module's
+        # setting_sources documentation for why an empty list is the safe
+        # default (token overhead and review-integrity risk both measured
+        # live against a real project directory).
+        setting_sources=params["setting_sources"],
     )
 
     for key in ("system_prompt", "model", "fallback_model", "effort", "thinking",
@@ -423,6 +475,9 @@ def main():
         max_turns=dict(type="int", default=1),
         max_budget_usd=dict(type="float"),
         cwd=dict(type="path"),
+        setting_sources=dict(
+            type="list", elements="str", choices=["user", "project", "local"], default=[]
+        ),
         add_dirs=dict(type="list", elements="path"),
         settings=dict(type="path"),
         timeout=dict(type="float", default=300.0),

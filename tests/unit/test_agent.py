@@ -22,6 +22,7 @@ DEFAULT_MODULE_PARAMS = {
     "max_turns": 1,
     "max_budget_usd": None,
     "cwd": None,
+    "setting_sources": [],
     "add_dirs": None,
     "settings": None,
     "timeout": 300.0,
@@ -297,6 +298,39 @@ class TestBuildOptions:
         assert kwargs["system_prompt"] == "be terse"
         assert kwargs["model"] == "claude-sonnet-5"
         assert kwargs["max_budget_usd"] == 0.25
+
+    def test_setting_sources_defaults_to_empty_list(self, mock_claude_agent_sdk):
+        # Regression guard: this module must never fall back to the SDK's own
+        # default of loading every filesystem settings source (user/project/
+        # local) -- that pulls a project's own CLAUDE.md/skills into context,
+        # which is both a large, invisible token cost and a review-integrity
+        # risk for the primary use case (dispatching review lenses over a
+        # repo's own diff). setting_sources must always be passed explicitly,
+        # never omitted the way the other optional params are.
+        from ansible_collections.aknochow.claude.plugins.modules.agent import (
+            build_options,
+        )
+
+        fake_module = MagicMock()
+        fake_module.params = dict(DEFAULT_MODULE_PARAMS)
+
+        kwargs = build_options(fake_module, mock_claude_agent_sdk.ClaudeAgentOptions)
+
+        assert kwargs["setting_sources"] == []
+
+    def test_setting_sources_explicit_override_passed_through(self, mock_claude_agent_sdk):
+        from ansible_collections.aknochow.claude.plugins.modules.agent import (
+            build_options,
+        )
+
+        fake_module = MagicMock()
+        params = dict(DEFAULT_MODULE_PARAMS)
+        params["setting_sources"] = ["project"]
+        fake_module.params = params
+
+        kwargs = build_options(fake_module, mock_claude_agent_sdk.ClaudeAgentOptions)
+
+        assert kwargs["setting_sources"] == ["project"]
 
 
 class TestMain:

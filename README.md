@@ -226,12 +226,22 @@ explicitly:
     ANTHROPIC_API_KEY: ""
 ```
 
-**Harness overhead**: even a minimal call (`tools: []`, `max_turns: 1`,
-no `system_prompt`) carries roughly 389 input tokens of fixed harness
-overhead (measured against `claude-haiku-4-5`) — not billable API
-content, just the CLI's own framing. A custom `system_prompt` adds on
-top of that. Account for this floor before comparing this module's
-token cost to `message`'s.
+**Harness overhead, dominated by `setting_sources`**: even a minimal
+call (`tools: []`, `max_turns: 1`, no `system_prompt`) carries fixed
+harness overhead (measured against `claude-haiku-4-5`) — not billable
+API content, just the CLI's own framing — but the size of that overhead
+is set almost entirely by `setting_sources`, not the harness baseline
+itself. With `setting_sources: []` (this module's default) a call
+measured ~234 input tokens. With `setting_sources` left unset (the
+SDK's own default of loading every filesystem settings source), the
+same call — run with `cwd` pointed at a real project directory carrying
+its own `CLAUDE.md`/skills — measured ~2,485 input tokens: roughly
+2,250 extra tokens of that project's own instructions pulled silently
+into context. A custom `system_prompt` adds on top of whichever
+baseline applies. Account for this floor before comparing this module's
+token cost to `message`'s, and see
+[Using `setting_sources` safely](#using-setting_sources-safely) below
+for why the default is empty.
 
 **`output_format` is genuinely enforced, with two gotchas**: setting
 `output_format` makes the SDK issue a forced structured-output tool
@@ -251,14 +261,46 @@ live testing matter for retry logic built on top of this:
    non-match. **Set `max_turns` to at least 2 whenever you set
    `output_format`.**
 
-**Python version note**: `claude-agent-sdk` 0.2.144 hangs indefinitely
-at its initial handshake under Python 3.14 in testing (the CLI itself
-responds instantly when driven directly — this looks like an
-anyio/asyncio incompatibility with a very new interpreter, not an auth
-or CLI issue). It ran cleanly under Python 3.12. Pin the control node's
-interpreter to `<3.14` for this module until upstream confirms 3.14
-support; `timeout` bounds the damage on an affected host but won't fix
-the hang.
+**Prefer the `cwd` option over the calling process's own directory**:
+confirmed live, `claude-agent-sdk` 0.2.144's `initialize` control
+request can stall indefinitely, and the reproducing variable is the
+underlying `claude` CLI subprocess's own working directory — not the
+Python interpreter version. Same interpreter throughout: starting that
+subprocess inside a directory carrying Claude Code project
+configuration (a `.claude/` tree, `CLAUDE.md`, etc.) stalled the
+handshake; the identical call run from a plain directory with no such
+configuration completed normally. Passing the project directory via
+the `cwd` *option* instead — so the SDK's subprocess launches
+elsewhere and is pointed at the project path — did not reproduce the
+stall. Prefer `cwd` for this reason as well as the token-overhead one
+above; `timeout` bounds the damage if a host hits this regardless. (An
+earlier version of this note wrongly blamed Python 3.14 for this —
+that could not be reproduced once working directory was isolated as
+the actual variable, so treat this as the corrected account.)
+
+### Using `setting_sources` safely
+
+`setting_sources` controls which filesystem settings sources
+(`user`/`project`/`local`) the underlying Claude Code session loads,
+and this module defaults it to `[]` — load none of them — which
+differs from the SDK's own default of loading everything when it's
+left unset. Two independent reasons, both measured live against a real
+project directory:
+
+1. **Token cost**: as above, ~234 tokens with `setting_sources: []`
+   vs. ~2,485 with every source loaded.
+2. **Review integrity**: the primary intended use of this module is
+   dispatching review lenses over a repository's own diff. If that
+   repository's own `CLAUDE.md`/skills load into the reviewing
+   session's context, the repository being reviewed can steer its own
+   review — deliberately or not. Diff content already has to be
+   treated as untrusted input for a review tool; silently loading
+   project-authored instructions on top of it is the same category of
+   risk.
+
+Set `setting_sources` explicitly (e.g. `["project"]`) only when you
+specifically want that project's own configuration applied and have
+weighed both costs above.
 
 **Rate limits**: not reproduced live (would require actually
 exhausting subscription quota). A hard rejection raises as a

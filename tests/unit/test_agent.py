@@ -416,3 +416,70 @@ class TestMain:
 
         fake_module.fail_json.assert_called_once()
         assert "claude-agent-sdk" in fake_module.fail_json.call_args.kwargs["msg"]
+
+
+class TestNormalizeUsageIterations:
+    """usage["iterations"] is the real per-turn record; the top-level scalars
+    report only the FINAL turn.
+
+    Regression guard for a real defect: a two-turn lens dispatch (one turn to
+    answer, one to satisfy a forced structured-output tool call) reported
+    input_tokens=4 on a diff review whose first turn carried the entire diff
+    plus an ~800-line system prompt. Reading the top level silently under-counts
+    input by three orders of magnitude, which makes any cost or efficiency
+    comparison built on it meaningless.
+    """
+
+    def test_sums_across_iterations_not_final_turn(self):
+        usage = {
+            "input_tokens": 4,
+            "output_tokens": 2960,
+            "output_tokens_details": {"thinking_tokens": 1904},
+            "iterations": [
+                {"input_tokens": 13733, "output_tokens": 100,
+                 "output_tokens_details": {"thinking_tokens": 1804}},
+                {"input_tokens": 4, "output_tokens": 2860,
+                 "output_tokens_details": {"thinking_tokens": 100}},
+            ],
+        }
+        from ansible_collections.aknochow.claude.plugins.modules.agent import (
+            normalize_usage,
+        )
+
+        result = normalize_usage(usage)
+        assert result["input_tokens"] == 13737
+        assert result["output_tokens"] == 2960
+        assert result["thinking_tokens"] == 1904
+        assert result["total_tokens"] == 13737 + 2960 + 1904
+
+    def test_falls_back_to_top_level_without_iterations(self):
+        """An older SDK, or a shape change, must degrade to the previous
+        behaviour rather than silently reporting zero."""
+        usage = {
+            "input_tokens": 1738,
+            "output_tokens": 199,
+            "output_tokens_details": {"thinking_tokens": 190},
+        }
+        from ansible_collections.aknochow.claude.plugins.modules.agent import (
+            normalize_usage,
+        )
+
+        result = normalize_usage(usage)
+        assert result["input_tokens"] == 1738
+        assert result["output_tokens"] == 199
+        assert result["thinking_tokens"] == 190
+
+    def test_sums_cache_token_fields_across_iterations(self):
+        usage = {
+            "iterations": [
+                {"cache_read_input_tokens": 500, "cache_creation_input_tokens": 20},
+                {"cache_read_input_tokens": 1500, "cache_creation_input_tokens": 5},
+            ],
+        }
+        from ansible_collections.aknochow.claude.plugins.modules.agent import (
+            normalize_usage,
+        )
+
+        result = normalize_usage(usage)
+        assert result["cache_read_tokens"] == 2000
+        assert result["cache_write_tokens"] == 25

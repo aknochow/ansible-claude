@@ -357,16 +357,40 @@ def normalize_stop_reason(raw):
 def normalize_usage(usage):
     """Map the SDK's raw usage dict onto this collection's fixed usage_normalized shape.
 
+    Sums across usage["iterations"] rather than reading the top-level scalars.
+    On a multi-turn run the top-level fields report only the FINAL turn, so a
+    two-turn lens dispatch (one turn to answer, one to satisfy a forced
+    structured-output tool call) reports a handful of input tokens instead of
+    thousands -- observed as input_tokens=4 on a real diff review whose first
+    turn carried the whole diff plus an ~800-line system prompt. Confirmed
+    against a live single-turn call where the top-level input_tokens (1738)
+    equalled iterations[0]'s, so the top level is the last iteration, not a
+    total.
+
+    Falls back to the top-level scalars when "iterations" is absent, so an
+    older SDK or a shape change degrades to the previous behaviour rather
+    than silently reporting zero.
+
     Missing values default to 0 rather than being omitted, per the collection's
     return contract -- consumers should be able to rely on every key existing.
     """
     usage = usage or {}
-    output_details = usage.get("output_tokens_details") or {}
-    input_tokens = usage.get("input_tokens") or 0
-    output_tokens = usage.get("output_tokens") or 0
-    cache_read_tokens = usage.get("cache_read_input_tokens") or 0
-    cache_write_tokens = usage.get("cache_creation_input_tokens") or 0
-    thinking_tokens = output_details.get("thinking_tokens") or 0
+    iterations = usage.get("iterations") or [usage]
+
+    def _sum(key, nested=None):
+        total = 0
+        for turn in iterations:
+            turn = turn or {}
+            if nested:
+                turn = turn.get(nested) or {}
+            total += turn.get(key) or 0
+        return total
+
+    input_tokens = _sum("input_tokens")
+    output_tokens = _sum("output_tokens")
+    cache_read_tokens = _sum("cache_read_input_tokens")
+    cache_write_tokens = _sum("cache_creation_input_tokens")
+    thinking_tokens = _sum("thinking_tokens", nested="output_tokens_details")
 
     return dict(
         input_tokens=input_tokens,

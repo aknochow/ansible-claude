@@ -398,7 +398,11 @@ def normalize_usage(usage):
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
         thinking_tokens=thinking_tokens,
-        total_tokens=input_tokens + output_tokens + thinking_tokens,
+        # thinking_tokens is a NESTED SUBSET of output_tokens (the SDK
+        # reports it under output_tokens_details), not an additional
+        # bucket -- a live call returned output_tokens 199 of which
+        # thinking_tokens was 190. Adding it here double-counted it.
+        total_tokens=input_tokens + output_tokens,
     )
 
 

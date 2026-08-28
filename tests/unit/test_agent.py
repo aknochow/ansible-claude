@@ -133,7 +133,10 @@ class TestNormalizeUsage:
             "cache_write_tokens": 20,
             "cache_read_tokens": 10,
             "thinking_tokens": 5,
-            "total_tokens": 155,
+            # input 100 + output 50. thinking (5) is a subset of
+            # output_tokens, not an additional bucket -- adding it
+            # here is what the original 155 got wrong.
+            "total_tokens": 150,
         }
 
 
@@ -450,7 +453,8 @@ class TestNormalizeUsageIterations:
         assert result["input_tokens"] == 13737
         assert result["output_tokens"] == 2960
         assert result["thinking_tokens"] == 1904
-        assert result["total_tokens"] == 13737 + 2960 + 1904
+        # thinking_tokens is a subset of output_tokens, not additive
+        assert result["total_tokens"] == 13737 + 2960
 
     def test_falls_back_to_top_level_without_iterations(self):
         """An older SDK, or a shape change, must degrade to the previous

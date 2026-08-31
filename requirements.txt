@@ -1,1 +1,2 @@
 anthropic[vertex]>=0.84.0
+claude-agent-sdk>=0.2.144

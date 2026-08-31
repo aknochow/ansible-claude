@@ -1,6 +1,6 @@
 namespace: aknochow
 name: claude
-version: 0.1.0
+version: 0.2.0
 readme: README.md
 authors:
   - Adam Knochowski <aknochow@redhat.com>

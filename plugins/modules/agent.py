@@ -324,7 +324,11 @@ usage_normalized:
       description: Tokens spent on extended thinking.
       type: int
     total_tokens:
-      description: Sum of input, output, and thinking tokens for this query.
+      description:
+        - Sum of input and output tokens for this query.
+        - Thinking tokens are NOT added. The SDK reports them under
+          C(output_tokens_details), so they are already counted inside
+          C(output_tokens) -- adding them again double-counts.
       type: int
 """
 

@@ -226,7 +226,7 @@ notes:
     C(status) of V(allowed_warning) or V(rejected), and a failing turn's
     C(ResultMessage) may carry C(api_error_status) (e.g. V(429)). This module
     does not currently special-case rate-limit errors -- they surface as a
-    generic failure message; treat any O(agent) failure as worth inspecting for
+    generic failure message; treat any M(aknochow.claude.agent) failure as worth inspecting for
     a 429/rate-limit signature before retrying in a loop."
 """
 

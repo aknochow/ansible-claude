@@ -1,4 +1,0 @@
-plugins/modules/agent.py validate-modules:missing-gplv3-license
-plugins/modules/count_tokens.py validate-modules:missing-gplv3-license
-plugins/modules/message.py validate-modules:missing-gplv3-license
-plugins/modules/message_batch.py validate-modules:missing-gplv3-license

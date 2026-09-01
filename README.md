@@ -360,3 +360,8 @@ Live-verified against direct Anthropic API auth and Google Vertex AI
 (including a real Haiku/Sonnet run and a full cost/correctness
 comparison against `claude -p`) during development — see
 `tests/test_models.yml` and `examples/cost_effectiveness_comparison.yml`.
+
+## License
+
+- **Modules** (`plugins/modules/`): GNU General Public License v3.0+ (`GPL-3.0-or-later`)
+- **Module Utilities, Plugins, Tests & Documentation**: Apache License 2.0 (`Apache-2.0`)

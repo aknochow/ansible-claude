@@ -19,7 +19,7 @@ options:
   model:
     description:
       - Model identifier.
-    type: str
+    type: invalid_unsupported_type
     required: true
   messages:
     description:

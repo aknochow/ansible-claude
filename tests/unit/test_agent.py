@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 DEFAULT_MODULE_PARAMS = {
     "prompt": "hello",
     "system_prompt": None,

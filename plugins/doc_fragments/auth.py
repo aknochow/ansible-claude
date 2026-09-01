@@ -40,12 +40,14 @@ options:
     description:
       - Google Cloud project ID for Vertex AI.
       - Required when O(provider=vertex).
-      - If the value is not specified, the value of the E(ANTHROPIC_VERTEX_PROJECT_ID) environment variable will be used.
+      - If the value is not specified, the value of the
+        E(ANTHROPIC_VERTEX_PROJECT_ID) environment variable will be used.
     type: str
   access_token:
     description:
       - Explicit Vertex AI access token. If omitted, falls back to Application Default Credentials.
-      - If the value is not specified, the value of the E(ANTHROPIC_VERTEX_ACCESS_TOKEN) environment variable will be used.
+      - If the value is not specified, the value of the
+        E(ANTHROPIC_VERTEX_ACCESS_TOKEN) environment variable will be used.
     type: str
   aws_access_key:
     description:

@@ -1,5 +1,7 @@
 #!/usr/bin/python
-# SPDX-License-Identifier: Apache-2.0
+# Copyright: (c) 2026, Adam Knochowski (@aknochow)
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from __future__ import annotations
 
@@ -9,7 +11,7 @@ module: message
 short_description: Send a message to Claude and return the response
 description:
   - Calls the Anthropic Messages API directly via the official Python SDK.
-  - Returns both the raw response and flattened convenience fields for use with O(register).
+  - Returns both the raw response and flattened convenience fields for use with C(register).
 version_added: "0.1.0"
 author:
   - Adam Knochowski (@aknochow)
@@ -220,7 +222,7 @@ def main():
     argument_spec = dict(
         model=dict(type="str", required=True),
         messages=dict(type="list", elements="dict", required=True),
-        max_tokens=dict(type="int", required=True),
+        max_tokens=dict(type="int", required=True, no_log=False),
         system=dict(type="str"),
         cache_system=dict(type="bool", default=False),
         temperature=dict(type="float"),

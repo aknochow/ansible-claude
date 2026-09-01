@@ -1,5 +1,7 @@
 #!/usr/bin/python
-# SPDX-License-Identifier: Apache-2.0
+# Copyright: (c) 2026, Adam Knochowski (@aknochow)
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 from __future__ import annotations
 
@@ -226,7 +228,7 @@ notes:
     C(status) of V(allowed_warning) or V(rejected), and a failing turn's
     C(ResultMessage) may carry C(api_error_status) (e.g. V(429)). This module
     does not currently special-case rate-limit errors -- they surface as a
-    generic failure message; treat any O(agent) failure as worth inspecting for
+    generic failure message; treat any M(aknochow.claude.agent) failure as worth inspecting for
     a 429/rate-limit signature before retrying in a loop."
 """
 

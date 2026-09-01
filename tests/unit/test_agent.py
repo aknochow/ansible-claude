@@ -386,8 +386,9 @@ class TestMain:
 
     def test_main_fails_cleanly_on_sdk_error(self, mock_claude_agent_sdk, monkeypatch):
         async def erroring_query(*, prompt, options):
+            for dummy in ():
+                yield
             raise mock_claude_agent_sdk.ClaudeSDKError("rate limit exhausted")
-            yield  # pragma: no cover - unreachable, keeps this an async generator
 
         mock_claude_agent_sdk.query = erroring_query
 

@@ -1,0 +1,17 @@
+---
+profile: min
+
+mock_modules:
+  - aknochow.claude.agent
+  - aknochow.claude.count_tokens
+  - aknochow.claude.message
+  - aknochow.claude.message_batch
+  # examples/sandboxed_execution.yml references openshell without vendoring it
+  - aknochow.openshell.sandbox
+
+warn_list:
+  - ignore-errors
+
+exclude_paths:
+  - .venv/
+  - tests/

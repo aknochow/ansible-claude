@@ -8,6 +8,6 @@ on:
 
 jobs:
   collection-ci:
-    uses: ./.github/workflows/collection-ci.yml
+    uses: aknochow/ansible-plaibook/.github/workflows/collection-ci.yml@main
     with:
       collection_name: claude

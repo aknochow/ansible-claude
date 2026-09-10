@@ -1,0 +1,15 @@
+---
+profile: min
+
+mock_modules:
+  - aknochow.claude.agent
+  - aknochow.claude.count_tokens
+  - aknochow.claude.message
+  - aknochow.claude.message_batch
+
+warn_list:
+  - ignore-errors
+
+exclude_paths:
+  - .venv/
+  - tests/

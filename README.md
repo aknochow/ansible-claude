@@ -1,5 +1,7 @@
 # aknochow.claude
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aknochow/ansible-claude/badge)](https://scorecard.dev/viewer/?uri=github.com/aknochow/ansible-claude)
+
 Ansible collection for calling Claude directly via the official
 [Anthropic Python SDK](https://pypi.org/project/anthropic/) — not the
 `claude` CLI. Built for deterministic, structured invocation from

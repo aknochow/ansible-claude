@@ -58,6 +58,12 @@ pip install 'anthropic[vertex]>=0.84.0'
 pip install 'claude-agent-sdk>=0.2.144'
 ```
 
+Install the collection itself from Galaxy (`ansible-galaxy collection install
+aknochow.claude`) or, in a venv, as a pip wheel that lands on Ansible's
+`ansible_collections` sys.path (`pip install .` from this checkout). The PyPI
+name is `aknochow-claude`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+wheel layout and a two-collection smoke test.
+
 ## Auth
 
 Set `provider` to `anthropic` (default), `vertex`, or `bedrock`. Each

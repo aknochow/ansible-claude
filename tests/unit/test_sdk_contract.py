@@ -14,8 +14,8 @@ from packaging.version import Version
 
 
 def test_installed_sdks_meet_the_collection_floor():
-    assert Version(version("anthropic")) >= Version("0.84.0")
-    assert Version(version("claude-agent-sdk")) >= Version("0.2.144")
+    assert Version(version("anthropic")) >= Version("1.11.0")
+    assert Version(version("claude-agent-sdk")) >= Version("0.2.163")
 
 
 def test_message_clients_and_agent_query_still_import():

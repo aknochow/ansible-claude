@@ -18,3 +18,10 @@ updates:
       uv-lock:
         patterns:
           - "*"
+        exclude-patterns:
+          - "claude-agent-sdk"
+          - "anthropic"
+      provider-sdk:
+        patterns:
+          - "claude-agent-sdk"
+          - "anthropic"
